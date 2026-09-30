@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Secure Shared File | Privacy-Preserving Cloud File Storage</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+
+  <!-- Top Simple Navbar -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M9 12l2 2 4-4"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>PrivacyVault</h1>
+        <span>SECURE EXPIRING LINK ACCESS</span>
+      </div>
+    </div>
+    <a href="/" class="btn btn-secondary btn-sm">Vault Login</a>
+  </nav>
+
+  <div class="public-share-wrapper">
+    <div class="glass-panel public-share-card" id="share-card">
+      
+      <!-- Loading State -->
+      <div id="loading-state">
+        <div class="lock-badge">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+        </div>
+        <h2>Verifying Secure Token...</h2>
+        <p style="color: var(--text-muted); margin-top: 0.5rem;">Authenticating time-limited cryptographic token with vault database.</p>
+      </div>
+
+      <!-- Valid Link State -->
+      <div id="valid-state" style="display: none;">
+        <div class="lock-badge">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        </div>
+        
+        <h2 id="shared-filename" style="margin-bottom: 0.25rem;">document.pdf</h2>
+        <p style="color: var(--text-muted); font-size: 0.85rem;" id="shared-filesize">Size: 1.2 MB</p>
+
+        <div class="countdown-box" id="countdown-display">
+          ⏳ Expiration: Calculating...
+        </div>
+
+        <div class="security-spec-grid" style="margin-bottom: 1.5rem;">
+          <div class="spec-item">
+            <div class="spec-title">Shared By</div>
+            <div class="spec-value" id="shared-owner">owner@example.com</div>
+          </div>
+          <div class="spec-item">
+            <div class="spec-title">Encryption</div>
+            <div class="spec-value">AES-256-GCM AEAD</div>
+          </div>
+          <div class="spec-item" style="grid-column: 1 / -1;">
+            <div class="spec-title">SHA-256 Integrity Digest</div>
+            <div class="spec-value" id="shared-sha256">...</div>
+          </div>
+        </div>
+
+        <button class="btn btn-cyan btn-block" id="download-btn" onclick="downloadSharedFile()" style="font-size: 1rem; padding: 0.9rem;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Decrypt & Download File
+        </button>
+
+        <p style="font-size: 0.75rem; color: var(--text-subtle); margin-top: 1rem;">
+          The ciphertext is retrieved from cloud storage, authenticated with AES-GCM tag, verified against SHA-256 integrity digest, and decrypted on-the-fly.
+        </p>
+      </div>
+
+      <!-- Expired / Error State -->
+      <div id="error-state" style="display: none;">
+        <div class="lock-badge" style="border-color: var(--accent-rose); color: var(--accent-rose); box-shadow: 0 0 25px rgba(244, 63, 94, 0.3);">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+        </div>
+        <h2 style="color: #f43f5e;" id="error-title">Link Inactive</h2>
+        <p style="color: var(--text-muted); margin-top: 0.5rem;" id="error-message">This share link has expired or was revoked by the file owner.</p>
+        <div style="margin-top: 1.5rem;">
+          <a href="/" class="btn btn-secondary btn-sm">Return to Vault</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const token = "{{ token }}";
+    let linkData = null;
+    let countdownInterval = null;
+
+    async function loadLinkInfo() {
+      try {
+        const res = await fetch(`/api/shares/public-info/${token}`);
+        const data = await res.json();
+        
+        document.getElementById("loading-state").style.display = "none";
+        
+        if (data.success && data.link) {
+          linkData = data.link;
+          document.getElementById("valid-state").style.display = "block";
+          document.getElementById("shared-filename").textContent = linkData.filename;
+          document.getElementById("shared-filesize").textContent = `File Size: ${formatBytes(linkData.file_size)}`;
+          document.getElementById("shared-owner").textContent = linkData.owner_email;
+          document.getElementById("shared-sha256").textContent = linkData.sha256_hash;
+          
+          startCountdown(linkData.expires_at, linkData.max_access_count, linkData.access_count);
+        } else {
+          showError(data.error || "This share link is no longer available.");
+        }
+      } catch (err) {
+        document.getElementById("loading-state").style.display = "none";
+        showError("Network error while connecting to secure vault.");
+      }
+    }
+
+    function startCountdown(expiresAtIso, maxAccess, accessCount) {
+      const expiresAt = new Date(expiresAtIso).getTime();
+      
+      function update() {
+        const now = new Date().getTime();
+        const diff = expiresAt - now;
+        
+        if (diff <= 0) {
+          clearInterval(countdownInterval);
+          showError("This sharing link has reached its expiration time.");
+          return;
+        }
+        
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        
+        let accessStr = maxAccess > 0 ? ` • ${maxAccess - accessCount} download(s) left` : ' • Unlimited downloads';
+        document.getElementById("countdown-display").innerHTML = `⏳ Link Expires in <strong>${hours}h ${minutes}m ${seconds}s</strong>${accessStr}`;
+      }
+      
+      update();
+      countdownInterval = setInterval(update, 1000);
+    }
+
+    function showError(msg) {
+      document.getElementById("valid-state").style.display = "none";
+      document.getElementById("loading-state").style.display = "none";
+      document.getElementById("error-state").style.display = "block";
+      document.getElementById("error-message").textContent = msg;
+    }
+
+    function downloadSharedFile() {
+      const btn = document.getElementById("download-btn");
+      btn.disabled = true;
+      btn.innerHTML = "🔓 Decrypting in-memory...";
+      
+      window.location.href = `/api/shares/public-download/${token}`;
+      
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Again`;
+      }, 3000);
+    }
+
+    function formatBytes(bytes, decimals = 2) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    // Load on start
+    loadLinkInfo();
+  </script>
+</body>
+</html>
